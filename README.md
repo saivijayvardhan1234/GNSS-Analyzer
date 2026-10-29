@@ -14,12 +14,12 @@ collections.
 │                     Streamlit UI  (app.py)                   │
 │                                                              │
 │  ┌──────────────┐  ┌──────────────────────────────────────┐  │
-│  │   Sidebar     │  │           Main Area                  │  │
-│  │  ─ Upload     │  │  📋 Data Quality / Audit             │  │
-│  │  ─ Folder     │  │  📊 Dynamic Charts (Plotly WebGL)    │  │
-│  │  ─ File sel.  │  │  🗂️ Table Explorer (DuckDB SQL)      │  │
-│  └──────────────┘  │  📥 Exports (CSV / Parquet / Excel)   │  │
-│                     └──────────────────────────────────────┘  │
+│  │   Sidebar    │  │           Main Area                  │  │
+│  │  ─ Upload    │  │  📋 Data Quality / Audit             │  │
+│  │  ─ Folder    │  │  📊 Dynamic Charts (Plotly WebGL)    │  │
+│  │  ─ File sel. │  │  🗂️ Table Explorer (DuckDB SQL)      │  │
+│  └──────────────┘  │  📥 Exports (CSV / Parquet / Excel)  │  │
+│                    └──────────────────────────────────────┘  │
 ├──────────────────────────────────────────────────────────────┤
 │  gnss_parser.py     Pure-Python parser & enrichment engine   │
 │  gnss_export.py     CSV · Parquet · Multi-Sheet Excel        │
@@ -80,21 +80,21 @@ streamlit run app.py
 | **Quarantine system** | Truncated lines are padded with nulls and logged. Unknown record prefixes are captured. All malformed lines are routed to a `quarantine` DataFrame with `line_no`, `raw_line`, and `reason` — the parser never crashes. |
 | **Device metadata** | Extracts `Version`, `Platform`, `Manufacturer`, `Model`, `GnssHardwareModel` from the header. |
 
-### 2. Strict Data Separation & Enrichment
+### 2. Data Enrichment
 
-Raw data columns remain completely pristine and untouched. All enriched columns are explicitly prefixed with `[DERIVED] ` so there is zero ambiguity:
+All generated columns carry a `gen_` prefix so they are instantly distinguishable from raw data.
 
-| Derived Column | Source | Description |
+| Generated Column | Source | Description |
 |-----------------|--------|-------------|
-| `[DERIVED] Time_UTC` | `utcTimeMillis` / `UnixTimeMillis` | Human-readable UTC datetime |
-| `[DERIVED] ConstellationName` | `ConstellationType` | GPS, GLONASS, Galileo, BeiDou, QZSS, IRNSS, SBAS |
-| `[DERIVED] Band` | `CarrierFrequencyHz` | L1, L5, L2, B1I, E6, etc. |
-| `[DERIVED] maxCn0` | `ExtraKeyValuePairs` (Fix table) | Parsed from `maxCn0=43\|meanCn0=29\|...` |
-| `[DERIVED] meanCn0` | `ExtraKeyValuePairs` (Fix table) | Mean C/N₀ |
-| `[DERIVED] satellites` | `ExtraKeyValuePairs` (Fix table) | Satellite count used in fix |
+| `gen_datetime_utc` | `utcTimeMillis` / `UnixTimeMillis` | Human-readable UTC datetime |
+| `gen_ConstellationName` | `ConstellationType` | GPS, GLONASS, Galileo, BeiDou, QZSS, IRNSS, SBAS |
+| `gen_Band` | `CarrierFrequencyHz` | L1, L5, L2, B1I, E6, etc. |
+| `gen_kv_maxCn0` | `ExtraKeyValuePairs` (Fix table) | Parsed from `maxCn0=43\|meanCn0=29\|...` |
+| `gen_kv_meanCn0` | `ExtraKeyValuePairs` (Fix table) | Mean C/N₀ |
+| `gen_kv_satellites` | `ExtraKeyValuePairs` (Fix table) | Satellite count used in fix |
 
 > **Key design**: All KV-pair keys are auto-discovered. If your device logs
-> `hdop=1.2|vdop=2.1`, columns `[DERIVED] hdop` and `[DERIVED] vdop` appear
+> `hdop=1.2|vdop=2.1`, columns `gen_kv_hdop` and `gen_kv_vdop` appear
 > automatically.
 
 ### 3. Dashboard UI (`app.py`)
@@ -102,36 +102,35 @@ Raw data columns remain completely pristine and untouched. All enriched columns 
 The dashboard has **four tabs**:
 
 #### 📋 Data Quality / Audit
-- **Data Completeness Matrix**: Sub-tab showing every column across active tables with exact non-null populated row percentages, raw vs derived filters, progress bars, and triage charts
-- **Column Missingness**: Interactive missingness audit with threshold filter and Plotly breakdown
-- **Table Summary**: Row count, raw vs derived column count, and time ranges per table
-- **Quarantine Viewer**: Malformed/truncated lines with line numbers and reasons
+- **Table summary**: row count, column count, time range per table
+- **Column missingness**: interactive table with native progress indicators (no matplotlib required) and Plotly bar breakdown
+- **Quarantine viewer**: displays all malformed lines with reasons
 
 #### 📊 Dynamic Charts
-- **📈 Cross-Table Timeline (Dual-Axis)**: Synchronized timeline forced to `[DERIVED] Time_UTC` on the X-axis. Plots Y1 from Table A (e.g., Fix accuracy) against Y2 from Table B (e.g., Raw/Status C/N₀ or AGC) on independent dual Y-axes, naturally accommodating different sampling rates (1Hz vs 40Hz) with selectable epoch aggregations.
-- **📊 Single Table Chart**: Flexible multi-chart builder (Scatter WebGL, Line, Histogram, Box, Violin, Aggregated Bar) with auto-sampling for large tables.
-- **DuckDB Quick Stats**: Instant `SUMMARIZE` statistics for plottable metrics.
+- Select any **table**, **X-axis**, **Y-axis**, **color/grouping**, and **chart type**
+- Supported chart types: Scatter, Line, Histogram, Box, Violin, Bar (aggregated)
+- **Auto-sampling**: Tables > 200K rows are sampled for responsive rendering
+- **WebGL rendering**: Plotly's WebGL backend handles large point clouds
+- **DuckDB stats**: Expandable panel with `SUMMARIZE` statistics
 
 #### 🗂️ Table Explorer
-- Browse any parsed table with column selection
-- **2^53 UI Safe Rendering**: High-precision nanosecond integer columns (`FullBiasNanos`, `TimeNanos`, etc.) are sanitized to strings for safe JavaScript/Streamlit rendering without truncating raw 64-bit numbers in exports.
-- **DuckDB SQL filter**: Write custom WHERE clauses like `Cn0DbHz > 30 AND "[DERIVED] ConstellationName" = 'GPS'`
+- Browse any parsed table with column filtering
+- **DuckDB SQL filter**: Write WHERE clauses like `Cn0DbHz > 30 AND gen_ConstellationName = 'GPS'`
 
 #### 📥 Exports
 - **Per-table CSV & Parquet** download buttons
-- **Multi-Sheet Excel Workbook** (structured `.xlsx` with completeness and audit sheets)
-- **Bulk export** to a local directory
+- **Multi-Sheet Excel** workbook (see below)
+- **Bulk export** to a local folder path
 
 ### 4. Multi-Sheet Excel Workbook
 
-Designed for structured archiving and reporting:
+Designed for handing off to a professor or collaborator:
 
 | Sheet | Contents |
 |-------|----------|
 | `_DeviceMeta` | Logger version, device manufacturer, model, GNSS hardware |
-| `_TableSummary` | One row per table: row count, column counts, time range |
-| `_DataCompleteness` | Per-column completeness % (Table, Column, Origin, PopulatedRows, CompletenessPct) |
-| `_DataQuality` | Per-column missingness (Table, Column, Origin, NullCount, NullPct) |
+| `_TableSummary` | One row per table: row count, column count, time range |
+| `_DataQuality` | Per-column missingness (Table, Column, NullCount, NullPct) |
 | `_Quarantine` | All malformed/truncated lines with reasons |
 | `Fix` | Full Fix table (position solutions) |
 | `Status` | Full Status table (satellite tracking) |
@@ -232,12 +231,12 @@ Device: samsung SM-S921E, Qualcomm GNSS GEN9, Logger v3.1.1.3
 Quarantined lines: 0
 
 Tables:
-  Raw       19,928 rows × 56 cols  (+ [DERIVED] Time_UTC, [DERIVED] ConstellationName, [DERIVED] Band)
-  Fix        1,500 rows × 21 cols  (+ [DERIVED] Time_UTC, [DERIVED] maxCn0, [DERIVED] meanCn0, [DERIVED] satellites)
-  Status    26,292 rows × 16 cols  (+ [DERIVED] Time_UTC, [DERIVED] ConstellationName, [DERIVED] Band)
-  Agc        7,156 rows × 16 cols  (+ [DERIVED] Time_UTC, [DERIVED] ConstellationName, [DERIVED] Band)
+  Raw       19,928 rows × 56 cols  (+ gen_datetime_utc, gen_ConstellationName, gen_Band)
+  Fix        1,500 rows × 21 cols  (+ gen_datetime_utc, gen_kv_maxCn0, gen_kv_meanCn0, gen_kv_satellites)
+  Status    26,292 rows × 16 cols  (+ gen_datetime_utc, gen_ConstellationName, gen_Band)
+  Agc        7,156 rows × 16 cols  (+ gen_datetime_utc, gen_ConstellationName, gen_Band)
 
-Excel workbook: 8,524,629 bytes (8.1 MB) — all checks passed
+Excel workbook: 8,519,235 bytes (8.1 MB) — all checks passed
 ```
 
 ---
@@ -245,5 +244,3 @@ Excel workbook: 8,524,629 bytes (8.1 MB) — all checks passed
 ## License
 
 MIT — use freely for research and education.
-#   G N S S - A n a l y z e r  
- 
